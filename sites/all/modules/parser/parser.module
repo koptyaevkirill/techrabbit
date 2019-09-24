@@ -1,0 +1,483 @@
+<?php
+
+function parser_menu() {
+    $items['admin/parser'] = array(
+        'title'            => 'Таблица цен конкурентов',
+        'page callback'    => 'parser_list_page',
+        'access arguments' => array('administer site configuration'),
+    );
+    $items['admin/parser/all/init'] = array(
+        'title'            => 'Change prices',
+        'page callback'    => 'parser_all_init_page',
+        'access arguments' => array('access content'),
+        'type' => MENU_CALLBACK
+    );
+    $items['admin/parser/%/init'] = array(
+        'title'            => 'Парсить цены',
+        'page callback'    => 'parser_init_page',
+        'page arguments' => array(2),
+        'access arguments' => array('access content'),
+        'type' => MENU_CALLBACK
+    );
+    $items['admin/parser/%/syn'] = array(
+        'title'            => 'Синхронизация товаров',
+        'page callback'    => 'parser_synchronization_products',
+        'page arguments' => array(2),
+        'access arguments' => array('access content'),
+        'type' => MENU_CALLBACK
+    );
+    $items['admin/parser/edit-id'] = array(
+        'title'            => 'Синхронизация товаров',
+        'page callback'    => 'parser_edit_id',
+        'access arguments' => array('access content'),
+        'type' => MENU_CALLBACK
+    );
+    $items['admin/parser/edit-price'] = array(
+        'title'            => 'Change prices',
+        'page callback'    => 'edit_price',
+        'access arguments' => array('access content'),
+        'type' => MENU_CALLBACK
+    );
+    return $items;
+}
+
+function parser_list_page() {
+    $filters = taxonomy_get_tree(3, $parent = 0, $max_depth = 1, $load_entities = false);;
+    isset($_GET['tid']) ? $tid = $_GET['tid'] : $tid = 7;
+    $query = db_select('node', 'n')->fields('n', array('nid', 'title', 'type'));
+    $query->innerJoin('field_data_field_product', 'fp', 'fp.entity_id = n.nid');
+    $query->fields('fp', array('field_product_product_id'));
+    $query->innerJoin('field_data_commerce_price', 'fc', 'fc.entity_id = fp.field_product_product_id');
+    $query->fields('fc', array('commerce_price_amount'));
+    $query->innerJoin('commerce_product', 'cp', 'cp.product_id = fp.field_product_product_id');
+    $query->fields('cp', array('sku', 'status'));
+
+    $query->innerJoin('field_data_field_category', 'fcat', 'fcat.entity_id = n.nid');
+    $query->fields('fcat', array('field_category_tid'));
+    $query->condition('n.type', 'product_display');
+    $query->condition('fcat.field_category_tid', $tid);
+    $query->condition('fcat.bundle', 'product_display');
+    $query->condition('cp.status', 1);
+    $query->orderBy('n.title', 'ASC');
+    $items = $query->execute()->fetchAll();
+
+    $query = db_select('parser', 'p')->fields('p');
+    $query->condition('p.site_name', 'biggeek');
+    $biggeek_items = $query->execute()->fetchAllAssoc('cpid');
+
+    $query = db_select('parser', 'p')->fields('p');
+    $query->condition('p.site_name', 'bananastore');
+    $bananastore_items = $query->execute()->fetchAllAssoc('cpid');
+
+    $query = db_select('parser', 'p')->fields('p');
+    $query->condition('p.site_name', 'store77');
+    $store77_items = $query->execute()->fetchAllAssoc('cpid');
+
+    $header = ['Название', 'biggeek.ru', 'bananastore.ru', 'store77.net', 'techrabbit.ru'];
+    return theme('parser_page', [
+        'header' => $header, 
+        'items' => $items, 
+        'biggeek_items' => $biggeek_items,
+        'bananastore_items' => $bananastore_items,
+        'store77_items' => $store77_items,
+        'filters' => $filters
+    ]);
+}
+
+function parser_init_page($site) {
+    $start = microtime(true);
+    $path = drupal_get_path('module', 'parser');
+    require_once $path.'/includes/simple_html_dom.php';
+    switch ($site) {
+        case 'biggeek':
+            parsing_biggeek(get_competitors_products($site));
+            break;
+        case 'bananastore':
+            parsing_bananastore(get_competitors_products($site));
+            break;
+        case 'store77':
+            parsing_store77(get_competitors_products($site));
+            break;
+    }
+    $time = microtime(true) - $start;
+    echo $time;
+}
+
+function parser_all_init_page() {
+    $sites = ['biggeek', 'bananastore', 'store77'];
+    foreach ($sites as $site) {
+        parser_init_page($site);
+    }
+    drupal_set_message('Цены успешно загружены');
+    drupal_goto('/admin/parser');
+}
+
+function parser_theme() {
+    return array(
+        'parser_page'    => array(
+            'variables' => array(
+                'items' => NULL
+            ),
+            'template'  => 'parser-page',
+        ),
+        'syn_page'    => array(
+            'variables' => array(
+                'items' => NULL
+            ),
+            'template'  => 'syn-page',
+        )
+    );
+}
+
+function parsing_biggeek($items) {
+    $sites = [
+        'https://biggeek.ru/catalog/apple-iphone-se',
+        'https://biggeek.ru/catalog/kupit-iphone-6',
+        'https://biggeek.ru/catalog/apple-iphone-6s',
+        'https://biggeek.ru/catalog/apple-iphone-6s-plus',
+        'https://biggeek.ru/catalog/apple-iphone-7',
+        'https://biggeek.ru/catalog/apple-iphone-7-plus',
+        'https://biggeek.ru/catalog/apple-iphone-8',
+        'https://biggeek.ru/catalog/apple-iphone-8-plus',
+        'https://biggeek.ru/catalog/apple-iphone-x',
+        'https://biggeek.ru/catalog/Apple-iPhone-XR',
+        'https://biggeek.ru/catalog/Apple-iPhone-XS',
+        'https://biggeek.ru/catalog/Apple-iPhone-XS-Max',
+        'https://biggeek.ru/catalog/apple-watch-series-1',
+        'https://biggeek.ru/catalog/apple-watch-series-2',
+        'https://biggeek.ru/catalog/apple-watch-series-3',
+        'https://biggeek.ru/catalog/-apple-watch-3-nike',
+        'https://biggeek.ru/catalog/Apple-Watch-Series-4',
+        'https://biggeek.ru/catalog/Apple-Watch-4-Nike',
+        'https://biggeek.ru/catalog/Apple-Watch-4-Herm%C3%A8s',
+        'https://biggeek.ru/catalog/apple-ipad-mini-4',
+        'https://biggeek.ru/catalog/apple-ipad-2017',
+        'https://biggeek.ru/catalog/apple-ipad-2018',
+        'https://biggeek.ru/catalog/apple-ipad-pro-105',
+        'https://biggeek.ru/catalog/apple-ipad-pro-129-2017',
+        'https://biggeek.ru/catalog/apple-ipad-pro-129-2018',
+        'https://biggeek.ru/catalog/apple-ipad-pro-11-2018',
+        'https://biggeek.ru/catalog/kupit-macbook-air',
+        'https://biggeek.ru/catalog/apple-macbook-2017',
+        'https://biggeek.ru/catalog/kupit-macbook-pro-retina',
+        'https://biggeek.ru/catalog/apple-macbook-pro-13-2016',
+        'https://biggeek.ru/catalog/apple-macbook-pro-15-2016',
+        'https://biggeek.ru/catalog/apple-macbook-pro-13-2017',
+        'https://biggeek.ru/catalog/apple-macbook-pro-15-2017',
+        'https://biggeek.ru/catalog/apple-macbook-pro-13-2018',
+        'https://biggeek.ru/catalog/apple-macbook-pro-15-2018',
+        'https://biggeek.ru/catalog/apple-macbook-air-13-2018',
+        'https://biggeek.ru/catalog/kupit-mac-mini',
+        'https://biggeek.ru/catalog/apple-mac-mini-2018',
+        'https://biggeek.ru/catalog/kupit-apple-mac-pro',
+        'https://biggeek.ru/catalog/kupit-apple-imac-computers',
+        'https://biggeek.ru/catalog/apple-imac-pro',
+        'https://biggeek.ru/catalog/multimedia-apple',
+        'https://biggeek.ru/catalog/besprovodnye-akusticheskie-sistemy',
+        'https://biggeek.ru/catalog/kupit-nausniki',
+        'https://biggeek.ru/catalog/kupit-nausniki?page=2',
+        'https://biggeek.ru/catalog/besprovodnoe-oborudovanie'
+    ];
+    foreach($sites as $site) {
+        $data = file_get_html($site);
+        $product = $data->find('#catalog-product-list .product-list > .item');
+        if(count($product)) {
+            foreach($product as $item) {
+                $name = str_replace("Apple ", "", $item->find('.item-info a.title', 0)->innertext);
+                $price = str_replace([",-", " "], "", $item->find('.price > ins', 0)->innertext);
+                if(array_key_exists($name, $items)) {
+                    db_update('parser')->fields([
+                        'price' => $price,
+                        'updated_at' => time()
+                    ])->condition('product_name', $name)->execute();
+                } else {
+                    db_insert('parser')->fields([
+                        'site_name' => 'biggeek',
+                        'product_name' => $name,
+                        'price' => $price,
+                        'cpid' => 0,
+                        'updated_at' => time()
+                    ])->execute();
+                }
+            }
+        }
+        $data->clear();
+        unset($data);
+    }
+}
+
+function parsing_bananastore($items) {
+    $sites = [
+        'https://bananastore.ru/apple/apple-iphone/?SORT=NAME',
+        'https://bananastore.ru/apple/apple-iphone/?SORT=NAME&PAGEN_1=2',
+        'https://bananastore.ru/apple/apple-iphone/?SORT=NAME&PAGEN_1=3',
+        'https://bananastore.ru/apple/apple-iphone/?SORT=NAME&PAGEN_1=4',
+        'https://bananastore.ru/apple/apple-iphone/?SORT=NAME&PAGEN_1=5',
+        'https://bananastore.ru/apple/apple-ipad/?SORT=NAME',
+        'https://bananastore.ru/apple/apple-ipad/?SORT=NAME&PAGEN_1=2',
+        'https://bananastore.ru/apple/apple-ipad/?SORT=NAME&PAGEN_1=3',
+        'https://bananastore.ru/apple/apple-macbook/?SORT=NAME',
+        'https://bananastore.ru/apple/apple-watch/?SORT=NAME',
+        'https://bananastore.ru/apple/apple-watch/?SORT=NAME&PAGEN_1=2',
+        'https://bananastore.ru/apple/apple-watch/?SORT=NAME&PAGEN_1=3',
+        'https://bananastore.ru/apple/apple-watch/?SORT=NAME&PAGEN_1=4',
+        'https://bananastore.ru/apple/apple-watch/?SORT=NAME&PAGEN_1=5',
+        'https://bananastore.ru/apple/multimediya-apple/?SORT=NAME',
+        'https://bananastore.ru/apple/aksessuary-apple/'
+    ];
+    foreach($sites as $site) {
+        $data = file_get_html($site);
+        $product = $data->find('.catalog-block .catalog-block-list > .catalog-block-item');
+        if(count($product)) {
+            foreach($product as $item) {
+                $name = str_replace("Apple ", "", $item->find('span.catalog-name > a', 0)->innertext);
+                $price = strip_tags(str_replace([" ", "Р"], "", $item->find('.catalog-price > .price', 0)->innertext));
+                if(array_key_exists($name, $items)) {
+                    db_update('parser')->fields([
+                        'price' => $price,
+                        'updated_at' => time()
+                    ])->condition('product_name', $name)->execute();
+                } else {
+                    db_insert('parser')->fields([
+                        'site_name' => 'bananastore',
+                        'product_name' => $name,
+                        'price' => $price,
+                        'cpid' => 0,
+                        'updated_at' => time()
+                    ])->execute();
+                }
+            }
+        }
+        $data->clear();
+        unset($data);
+    }
+}
+
+function parsing_store77($items) {
+	$sites = [
+        'https://store77.net/apple_iphone_se/',
+        'https://store77.net/apple_iphone_6/',
+        'https://store77.net/iphone_6s/',
+        'https://store77.net/apple_iphone_7/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=1',
+        'https://store77.net/apple_iphone_7/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=2',
+        'https://store77.net/apple_iphone_7_plus/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=1',
+        'https://store77.net/apple_iphone_7_plus/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=2',
+        'https://store77.net/apple_iphone_8/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=1',
+        'https://store77.net/apple_iphone_8/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=2',
+        'https://store77.net/apple_iphone_8_plus/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=1',
+        'https://store77.net/apple_iphone_8_plus/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=2',
+        'https://store77.net/apple_iphone_x/',
+        'https://store77.net/apple_iphone_xs/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=1',
+        'https://store77.net/apple_iphone_xs/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=2',
+        'https://store77.net/apple_iphone_xs_max/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=1',
+        'https://store77.net/apple_iphone_xs_max/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=2',
+        'https://store77.net/apple_iphone_xs_max/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=3',
+        'https://store77.net/apple_iphone_xr/',
+        'https://store77.net/planshety_apple/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=1',
+        'https://store77.net/planshety_apple/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=2',
+        'https://store77.net/planshety_apple/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=3',
+        'https://store77.net/planshety_apple/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=4',
+        'https://store77.net/planshety_apple/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=5',
+        'https://store77.net/planshety_apple/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=6',
+        'https://store77.net/apple_watch_/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=1',
+        'https://store77.net/apple_watch_/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=2',
+        'https://store77.net/apple_watch_/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=3',
+        'https://store77.net/apple_watch_/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=4',
+        'https://store77.net/apple_watch_/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=5',
+        'https://store77.net/apple_mac_mini/',
+        'https://store77.net/apple_imac_21_5/',
+        'https://store77.net/apple_imac_27/',
+        'https://store77.net/apple_imac_pro_27/',
+        'https://store77.net/apple_macbook_new/',
+        'https://store77.net/apple_macbook_air/',
+        'https://store77.net/apple_macbook_pro/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=1',
+        'https://store77.net/apple_macbook_pro/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=2',
+        'https://store77.net/apple_macbook_pro/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=3',
+        'https://store77.net/aksessuary_dlya_apple/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=1',
+        'https://store77.net/aksessuary_dlya_apple/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=2',
+        'https://store77.net/portativnaya_akustika_apple/',
+        'https://store77.net/apple_tv/',
+        'https://store77.net/elektrosamokaty/',
+        'https://store77.net/ekshn_kamery/',
+        'https://store77.net/giroskutery/',
+        'https://store77.net/kvadrokoptery/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=1',
+        'https://store77.net/kvadrokoptery/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=2',
+        'https://store77.net/naushniki_apple_/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=1',
+        'https://store77.net/naushniki_apple_/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=2',
+        'https://store77.net/audio/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=1',
+        'https://store77.net/audio/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=2',
+        'https://store77.net/audio/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=3',
+        'https://store77.net/audio/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=4',
+        'https://store77.net/audio/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=5',
+        'https://store77.net/audio/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=6',
+        'https://store77.net/audio/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=7',
+        'https://store77.net/audio/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=8',
+        'https://store77.net/audio/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=9',
+        'https://store77.net/audio/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=10',
+        'https://store77.net/audio/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=11',
+        'https://store77.net/audio/?arrFilter_202_53009198=Y&set_filter=Y&ddexp4attempt=1&PAGEN_1=12'
+    ];
+    $count = 0;
+    foreach($sites as $site) {
+        $data = file_get_html($site);
+        $product = $data->find('.wrap_list_prod .blocks_product');
+        if(count($product)) {
+            foreach($product as $item) {
+                $name = $item->find('.bp_hover_pt > .bp_text_info', 0)->innertext;
+                $price = str_replace([" ", "&mdash;"], "", $item->find('.bp_hover_pt > .bp_text_price', 0)->innertext);
+                echo "<pre>";
+                var_dump($name);
+                echo "</pre>";
+                $count++;
+                if(array_key_exists($name, $items)) {
+                    db_update('parser')->fields([
+                        'price' => $price,
+                        'updated_at' => time()
+                    ])->condition('product_name', $name)->condition('site_name', 'store77')->execute();
+                } else {
+                    db_insert('parser')->fields([
+                        'site_name' => 'store77',
+                        'product_name' => $name,
+                        'price' => $price,
+                        'cpid' => 0,
+                        'updated_at' => time()
+                    ])->execute();
+                }
+            }
+        }
+        echo '<br/>'.$count;
+        $data->clear();
+        unset($data);
+    }
+}
+
+
+function get_competitors_products($type) {
+    $query = db_select('parser', 'p')->fields('p');
+    $query->condition('p.site_name', $type);
+    $items = $query->execute()->fetchAllAssoc('product_name');
+    return $items;
+}
+
+function parser_synchronization_products($type) {
+    $filters = taxonomy_get_tree(3, $parent = 0, $max_depth = 1, $load_entities = false);;
+    isset($_GET['tid']) ? $tid = $_GET['tid'] : $tid = 7;
+    $query = db_select('commerce_product', 'cp')->fields('cp', array('product_id', 'title', 'sku', 'status'));
+    $query->innerJoin('field_data_field_product', 'fp', 'fp.field_product_product_id = cp.product_id');
+    $query->innerJoin('field_data_field_category', 'fc', 'fc.entity_id = fp.entity_id');
+    $query->fields('fc', array('field_category_tid'));
+    $query->condition('fc.field_category_tid', $tid);
+    $query->condition('fc.bundle', 'product_display');
+    $query->condition('cp.type', ['product'], 'IN');
+    $query->condition('cp.status', 1);
+    $query->orderBy('cp.title', 'ASC');
+    $items = $query->execute()->fetchAll();
+
+    $query = db_select('parser', 'p')->fields('p');
+    $query->condition('p.site_name', $type);
+    $query->orderBy('p.product_name', 'ASC');
+    $parset_items_app_minsk = $query->execute()->fetchAll();
+
+    $header = ['Название', $type];
+    return theme('syn_page', ['type' => $type, 'header' => $header, 'items' => $items, 'parset_items_app_minsk' => $parset_items_app_minsk, 'filters' => $filters]);
+}
+
+function parser_edit_id() {
+    $query = db_update('parser')->fields(['cpid' => $_POST['cpid']])->condition('id', $_POST['id'])->execute();
+    if($query) {
+        echo 'Успешно изменено!';
+    } else {
+        echo 'Ошибка!';
+    }
+}
+
+function edit_price() {
+    $query = db_select('parser', 'p')->fields('p');
+    $query->condition('p.site_name', $_POST['site_name']);
+    $items = $query->execute()->fetchAll();
+    foreach($items as $item) {
+        if($item->price) {
+            $query = db_update('field_data_commerce_price')
+              ->fields(array('commerce_price_amount' => $item->price))
+              ->condition('entity_id', $item->cpid)
+              ->execute();
+        }
+    }
+    if($query) {
+        echo 'Успешно изменено!';
+    } else {
+        echo 'Ошибка!';
+    }
+}
+
+
+function synchronization_products() {
+    $query = db_select('commerce_product', 'cp')->fields('cp', array('product_id', 'title', 'sku'));
+    $query->condition('cp.type', ['product_display'], 'IN');
+    $commerce_products = $query->execute()->fetchAll();
+
+    foreach($commerce_products as $commerce_product) {
+        $query = db_select('parser', 'p')->fields('p');
+        $query->condition('p.product_name', '%' . $commerce_product->sku . '%', 'LIKE');
+        $query->condition('p.site_name', 'i-product');
+        $search_sku = $query->execute()->fetch();
+
+        if($search_sku) {
+            db_update('parser')->fields([
+                'cpid' => $commerce_product->product_id,
+                'updated_at' => time()
+            ])->condition('id', $search_sku->id)->execute();
+        } else {
+            $name = [];
+            if($name[] = str_replace("Apple ", "", stristr($commerce_product->title, 'GB', true))) {
+                $colors = ['Silver', 'Gold', 'Space Gray', 'Jet Black', 'Red'];
+                foreach($colors as $color) {
+                    if(stristr($commerce_product->title, $color)) {
+                        $name[] = $color;
+                        break;
+                    }
+                }
+                $query = db_select('parser', 'p')->fields('p');
+                foreach($name as $name_part){
+                    $query->condition('p.product_name', '%' . $name_part . '%', 'LIKE');
+                }
+                $query->condition('p.site_name', 'i-product');
+                $query->condition('p.cpid', 0, '=');
+                $search_name = $query->execute()->fetch();
+                if($search_name) {
+                    db_update('parser')->fields([
+                        'cpid' => $commerce_product->product_id,
+                        'updated_at' => time()
+                    ])->condition('id', $search_name->id)->execute();
+                } else {
+                    if(stristr($commerce_product->title, 'iPad')) {
+                        $name_pad = explode(" ", $name[0]);
+                        array_push($name_pad, $name[1]);
+
+                        $query = db_select('parser', 'p')->fields('p');
+                        foreach($name_pad as $name_pad_part){
+                            $query->condition('p.product_name', '%' . $name_pad_part . '%', 'LIKE');
+                        }
+                        $query->condition('p.site_name', 'i-product');
+                        $query->condition('p.cpid', 0, '=');
+                        $search_name = $query->execute()->fetch();
+                        if($search_name) {
+                            db_update('parser')->fields([
+                                'cpid' => $commerce_product->product_id,
+                                'updated_at' => time()
+                            ])->condition('id', $search_name->id)->execute();
+                        }
+                        // krumo($search_name);
+                    }    
+                }
+                
+
+            }
+            
+            
+
+        }
+
+        // exit();
+    }
+}

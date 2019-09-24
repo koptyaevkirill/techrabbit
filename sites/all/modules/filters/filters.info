@@ -1,0 +1,10 @@
+name = Filter for category
+description = "Filter for category."
+core = 7.x
+package = Administration
+
+; Information added by Drupal.org packaging script on 2017-01-21
+version = "7.x-2.0"
+core = "7.x"
+project = "filters"
+datestamp = "1424631189"

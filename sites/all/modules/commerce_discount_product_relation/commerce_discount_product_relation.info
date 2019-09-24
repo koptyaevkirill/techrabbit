@@ -1,0 +1,15 @@
+name = Commerce Discount Product Relation
+description = Add entityreference field to product to be referencing to discount offer.
+version = 7.x-1.0
+core = 7.x
+dependencies[] = entity
+dependencies[] = entityreference
+dependencies[] = commerce_discount
+package = Commerce (contrib)
+
+; Information added by Drupal.org packaging script on 2017-02-19
+version = "7.x-1.0"
+core = "7.x"
+project = "commerce_discount_product_relation"
+datestamp = "1487506086"
+

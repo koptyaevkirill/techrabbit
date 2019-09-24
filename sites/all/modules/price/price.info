@@ -1,0 +1,9 @@
+name = Price Editor
+description = "Edit price material"
+package = My module
+core = 7.x
+
+version = "7.x-1.0"
+core = "7.x"
+project = "price"
+datestamp = "1283512306"

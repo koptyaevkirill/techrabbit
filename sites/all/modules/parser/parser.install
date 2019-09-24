@@ -1,0 +1,41 @@
+<?php
+function parser_uninstall() {
+    cache_clear_all('parser', 'cache', TRUE);
+    drupal_uninstall_schema('parser');
+    menu_rebuild();
+}
+function parser_schema() {
+    $schema['parser'] = array(
+        'description' => 'The base table for parser.',
+        'fields' => array(
+            'id' => array(
+                'description' => 'The primary identifier for a parser action.',
+                'type' => 'serial',
+                'unsigned' => TRUE,
+                'not null' => TRUE,
+            ),
+            'site_name' => array(
+                'description' => 'Name of the site',
+                'type' => 'text',
+            ),
+            'product_name' => array(
+                'description' => 'Product name on the site',
+                'type' => 'text',
+            ),
+            'price' => array(
+                'description' => 'Price on the site',
+                'type' => 'text',
+            ),
+            'cpid' => array(
+                'description' => 'Commercial product id',
+                'type' => 'int'
+            ),
+            'updated_at' => array(
+                'type' => 'int',
+                'length' => 11
+            )
+        ),
+        'primary key' => array('id'),
+    );
+    return $schema;
+}

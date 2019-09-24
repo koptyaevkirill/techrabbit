@@ -1,0 +1,109 @@
+<?php
+
+/**
+ * Implements hook_menu().
+ */
+function filters_menu() {
+  $items['filters'] = array(
+    'title' => 'Filter',
+    'page callback' => 'filters_search',
+    'access arguments' => array('access content')
+  );
+  return $items;
+}
+
+function filters_theme() {
+$path = drupal_get_path('module', 'filters').'/tpl';
+    return array(
+        'product_display' => array(
+            'template' => 'products',
+            'variables' => array(
+                'nodes' => null
+            ),
+            'path' => $path,
+        ),
+    );
+}
+
+function filters_search() {
+    $query = db_select('node', 'n');
+    $query->fields('n', array('nid'));
+    $query->condition('n.type', $_POST['node_type']);
+    foreach ($_POST as $index => $item) {
+        $fields = explode('_', $index);
+        if($fields[1] === 'field' && !empty($item) && !empty($item[0])) {
+            $index = str_replace($fields[0].'_', '', $index);
+            $query->leftJoin('field_data_'.$index, $index, $index.'.entity_id = n.nid');
+            switch ($fields[0]) {
+                case 'select':
+                    if(is_array($item)){
+                        $item = array_diff($item, array(''));
+                        $query->condition($index.'.'.$index.'_tid', end($item));
+                    } else {
+                        $query->condition($index.'.'.$index.'_tid', $item);
+                        $query->condition($index.'.entity_type', 'node');
+                    }
+                    break;
+                case 'between':
+                    $query->condition($index.'.'.$index.'_value', $item, 'BETWEEN');
+                    break;
+                case 'checkbox':
+                    $query->condition($index.'.'.$index.'_tid', $item, 'IN');
+                    break;
+                case 'relation':
+                    foreach($item as $relation) {
+                        $relation_fields = explode('_', $relation);
+                        $relation_index = str_replace($relation_fields[0].'_'.$relation_fields[1].'_', '', $relation);
+                        $query->leftJoin('field_data_'.$relation_index, $relation_index, $relation_index.'.entity_id = '.$index.'.'.$index.'_nid');
+                        if(array_key_exists($relation, $_POST)) {
+                            switch ($relation_fields[1]) {
+                                case 'checkbox':
+                                    $query->condition($relation_index.'.'.$relation_index.'_tid', $_POST[$relation], 'IN');
+                                    break;
+                            }
+                        }
+                    }
+                    break;
+            }
+        }
+    }
+    $query->groupBy('n.nid');
+    if(isset($_POST['limit'])) {
+        $query->range(0, $_POST['limit']);
+    }
+    if(isset($_POST['order_dir']) && !empty($_POST['order_dir']) && isset($_POST['order_title']) && !empty($_POST['order_title'])) {
+        $query->orderBy($_POST['order_title'], $_POST['order_dir']);
+    } else {
+        $query->orderBy('n.nid', 'DESC');
+    }
+    // if(isset($_POST['page'])){
+    //     $page = $_POST['page'];
+    //     $query->range($page*12-12, 12);
+    // } else {
+    //     $query->range(0, 12);
+    // }
+    $nodes = $query->execute()->fetchAll();
+    // var_dump($nodes);
+    echo theme($_POST['node_type'], array('nodes' => $nodes));
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

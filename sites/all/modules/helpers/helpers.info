@@ -1,0 +1,10 @@
+name = Helpers
+description = Provides a mechanism helped to modules.
+core = 7.x
+
+; Information added by drupal.org packaging script on 2012-08-09
+version = "7.x-1.2"
+core = "7.x"
+project = "helpers"
+datestamp = "1344525185"
+

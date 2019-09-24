@@ -1,0 +1,123 @@
+<?php
+
+function price_menu(){
+    $items['admin/price'] = array(
+        'title'            => 'Цены',
+        'page callback'    => 'price_page',
+        'access arguments' => array('administer site configuration'),
+    );
+    $items['admin/price/%/edit'] = array(
+        'title'            => 'Цены',
+        'page callback'    => 'price_edit',
+        'page arguments' => array(2),
+        'access arguments' => array('administer site configuration'),
+        'type' => MENU_CALLBACK
+    );
+    $items['admin/status/%/edit'] = array(
+        'title'            => 'Статус',
+        'page callback'    => 'status_edit',
+        'page arguments' => array(2),
+        'access arguments' => array('administer site configuration'),
+        'type' => MENU_CALLBACK
+    );
+    return $items;
+}
+
+function price_theme() {
+    return array(
+        'price-page' => array(
+            'variables' => array(
+                'items' => NULL,
+                'header' => NULL
+            ),
+            'template'  => 'price-page',
+        )
+    );
+}
+
+function price_page() {
+    isset($_GET['text']) ? $text = $_GET['text'] : $text = 0;
+    $query = db_select('node', 'n')->fields('n', array('nid', 'title'));
+    $query->leftJoin('field_data_field_product', 'fp', 'fp.entity_id = n.nid');
+    $query->fields('fp', array('field_product_product_id'));
+    $query->leftJoin('field_data_field_product_price', 'fc', 'fc.entity_id = n.nid');
+    $query->fields('fc', array('field_product_price_value'));
+    
+    $query->leftJoin('commerce_product', 'fa', 'fa.product_id = fp.field_product_product_id');
+    $query->fields('fa', array('sku', 'status'));
+    
+    $query->leftJoin('field_data_commerce_price', 'price', 'price.entity_id = fa.product_id');
+    $query->fields('price', array('commerce_price_amount'));
+    
+    
+    $query->orderBy('price.commerce_price_amount', 'ASC');
+    if($text) {
+        $query->condition('n.title', '%' . db_like($text) . '%', 'LIKE');
+    }
+    $query->condition('n.type', 'product_display');
+    $query->condition('fa.status', 1);
+    
+    $items = $query->execute()->fetchAll();
+    $header = array('Артикул', 'Название', 'Цена');
+    return theme('price-page', array('header' => $header, 'items' => $items));
+}
+function price_edit($id) {
+    $query = db_update('field_data_commerce_price')
+      ->fields(array('commerce_price_amount' => $_POST['price']))
+      ->condition('entity_id', $id)
+      ->execute();
+    $query = db_select('field_data_field_product', 'fp')->fields('fp', array('entity_id'))->condition('fp.field_product_product_id', $id);
+    $items = $query->execute()->fetch();
+    $query = db_update('field_data_field_product_price');
+    $query->fields(array('field_product_price_value' => $_POST['price']));
+    $query->condition('entity_id', $items->entity_id);
+    $query->execute();
+    if($query) {
+        echo 'Успешно изменено!';
+    } else {
+        echo 'Ошибка!';
+    }
+}
+
+function status_edit($id) { 
+    $exist = db_select('field_data_field_oder_status', 'status')->fields('status', array('field_oder_status_tid'))->condition('status.entity_id', $id)->execute()->fetchAll();
+    if($exist) {
+        $query = db_update('field_data_field_oder_status')
+          ->fields(array('field_oder_status_tid' => $_POST['status']))
+          ->condition('entity_id', $id)
+          ->execute();
+        echo 'Успешно изменено!';
+    } else {
+        $product = commerce_product_load($id);
+        $product->field_oder_status['und'][0][tid] = $_POST['status'];
+        commerce_product_save($product);
+        echo 'Успешно добавлено!';
+    }
+}
+
+function get_region_name() {
+    $url = $_SERVER['SERVER_NAME'];
+    $region = explode('.', $url);
+    switch ($region[0]) {
+    case 'brest':
+      $region = 'Брест';
+      break;
+    case 'vitebsk':
+      $region = 'Витебск';
+      break;
+    case 'gomel':
+      $region = 'Гомел';
+      break;
+    case 'grodno':
+      $region = 'Гродно';
+      break;
+    case 'mogilev':
+      $region = 'Могилев';
+      break;
+
+    default:
+      $region = 'Минск';
+      break;
+    }
+    return $region;
+}

@@ -1,0 +1,146 @@
+<?php
+
+/*
+ * Implemetns hook_commerce_discount_update().
+ */
+function commerce_discount_product_relation_commerce_discount_update($discount) {
+  $product_ids = commerce_discount_product_relation_load_products($discount->discount_id);
+  commerce_discount_product_relation_products_update_discount($discount, $product_ids);
+}
+
+/*
+ * Implemetns hook_commerce_discount_insert().
+ */
+function commerce_discount_product_relation_commerce_discount_insert($discount) {
+  // We process new discount item if it is active.
+  if ($discount->status) {
+    commerce_discount_product_relation_products_update_discount($discount);
+  }
+}
+
+/**
+ * Implements hook_commerce_discount_delete().
+ */
+function commerce_discount_product_relation_commerce_discount_delete($discount) {
+  commerce_discount_product_relation_unset_discount($discount);  
+}
+
+/**
+ * Implements hook_commerce_product_type_insert().
+ */
+function commerce_discount_product_relation_commerce_product_type_insert() {
+  module_load_install('commerce_discount_product_relation');
+  commerce_discount_product_relation_install_helper();
+}
+
+/**
+ * Unset discount from products.
+ * 
+ * @param object $discount
+ *	  commerce discount object.
+ */
+function commerce_discount_product_relation_unset_discount($discount) {
+  $products = entity_load('commerce_product', commerce_discount_product_relation_load_products($discount->discount_id));
+  foreach ($products as $product) {
+    $wrapper = entity_metadata_wrapper('commerce_product', $product);
+    foreach ($wrapper->commerce_product_discounts as $delta => $w_discount) {
+      if ($w_discount->getIdentifier() == $discount->discount_id)	{
+        $wrapper->commerce_product_discounts[$delta] = NULL;
+      }
+    }
+    $wrapper->save();
+  }
+}
+
+/**
+ * Loads products related to a discount.
+ * 
+ * @param integer $discount_id
+ *	  commerce discount id.
+ * @return array
+ *	  array of commerce product ids.
+ */
+function commerce_discount_product_relation_load_products($discount_id) {
+  $query = new EntityFieldQuery();
+  $query->entityCondition('entity_type', 'commerce_product');
+  $query->fieldCondition('commerce_product_discounts', 'target_id', $discount_id);
+  $result = $query->execute();
+  return isset($result['commerce_product']) ? array_keys($result['commerce_product']) : array();
+}
+
+/**
+ * Updates products related to the discount.
+ * 
+ * @param object $discount
+ *	  commerce discount object.
+ * @param array $exists_product_ids
+ *	  array of commerce product ids, which was already related to discount.
+ *	  Use this parameter if any product was already related to the discount.
+ */
+function commerce_discount_product_relation_products_update_discount($discount, $exists_product_ids = array()) {
+  $supported_conditions = array('commerce_order_contains_products', 'commerce_order_has_specific_quantity_products',
+	'commerce_product_contains_products');
+
+  $new_product_ids = array();
+  if (is_array($discount->inline_conditions) && !empty($discount->inline_conditions)) {
+    foreach ($discount->inline_conditions[LANGUAGE_NONE] as $item) {
+      $product_ids = array();
+
+      // Get product ids related to the discount.
+      if (in_array($item['condition_name'], $supported_conditions) && $discount->status) {
+        if (is_array($item['condition_settings'])) {
+          $conditions = $item['condition_settings'];
+        }
+        else {
+          $conditions = unserialize($item['condition_settings']);
+        }
+
+        $product_ids_container = array();
+        switch ($discount->type) {
+          case 'order_discount':
+            $product_ids_container = $conditions['products'];
+            break;
+          case 'product_discount':
+            $product_ids_container = $conditions['sku'];
+            break;
+        }
+
+        foreach ($product_ids_container as $pid) {
+          $product_ids[] = $pid['product_id'];
+        }
+        if ($item['condition_negate']) {
+          $query = new EntityFieldQuery();
+          $query->entityCondition('entity_type', 'commerce_product');
+          $query->entityCondition('entity_id', $product_ids, 'NOT IN');
+          $result = $query->execute();
+          $product_ids = array_keys($result['commerce_product']);
+        }
+      }
+      $new_product_ids = array_merge($new_product_ids, $product_ids);
+    }
+
+    // Update products
+    $products = entity_load('commerce_product', array_merge($new_product_ids, $exists_product_ids));
+    foreach ($products as $product) {
+      $wrapper = entity_metadata_wrapper('commerce_product', $product);
+      $update = FALSE;
+
+      if (in_array($product->product_id, $exists_product_ids) && !in_array($product->product_id, $new_product_ids)) {
+        foreach ($wrapper->commerce_product_discounts as $delta => $w_discount) {
+          if ($w_discount->getIdentifier() == $discount->discount_id)	{
+            $wrapper->commerce_product_discounts[$delta] = NULL;
+            $update = TRUE;
+          }
+        }
+      }
+      elseif (in_array($product->product_id, $new_product_ids) && !in_array($product->product_id, $exists_product_ids)) {
+        $wrapper->commerce_product_discounts = array($discount->discount_id);
+        $update = TRUE;
+      }
+
+      if ($update) {
+        $wrapper->save();
+      }
+    }
+  }
+}

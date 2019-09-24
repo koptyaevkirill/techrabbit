@@ -1,0 +1,2 @@
+<?php 'node/'.$row->nid == $_GET['q'] ? $is_active = 'is-active' : $is_active = '';?>
+<a class="sidebar__link textside__link <?=$is_active;?>" href="<?=url('node/'.$row->nid);?>"><?=$row->node_title;?></a>

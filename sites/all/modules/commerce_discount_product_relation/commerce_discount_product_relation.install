@@ -1,0 +1,77 @@
+<?php
+
+/**
+ * Implements hook_install().
+ */
+function commerce_discount_product_relation_install() {
+  commerce_discount_product_relation_install_helper();
+}
+
+/**
+ * Install helper function.
+ */
+function commerce_discount_product_relation_install_helper() {
+  $fields = field_read_fields(array(), array('include_inactive' => TRUE));
+  if (empty($fields['commerce_product_discounts'])) {
+	$field = array(
+	  'entity_types' => array('commerce_product'),
+	  'settings' => array(
+		'handler' => 'base',
+		'target_type' => 'commerce_discount',
+		'handler_settings' => array(
+		  'target_bundles' => array(),
+		),
+	  ),
+	  'field_name' => 'commerce_product_discounts',
+	  'type' => 'entityreference',
+	  'locked' => TRUE,
+	  'cardinality' => FIELD_CARDINALITY_UNLIMITED,
+	);
+	field_create_field($field);
+  }
+
+  $instances = field_info_instances('commerce_product');
+  foreach ($instances as $bundle_name => $info) {
+	if (!isset($info['commerce_product_discounts'])) {
+	  $instance = array(
+		'field_name' => 'commerce_product_discounts',
+		'entity_type' => 'commerce_product',
+		'bundle' => $bundle_name,
+		'label' => t('Discount'),
+	  );
+	  field_create_instance($instance);
+	}
+  }
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function commerce_discount_product_relation_uninstall() {
+  $bundles = field_info_instances('commerce_product');
+  foreach ($bundles as $bundle) {
+	if (isset($bundle['commere_product_discounts'])) {
+	  field_delete_instance($bundle['commerce_product_discounts']);
+	}
+  }
+
+  field_delete_field('commerce_product_discounts');
+}
+
+/**
+ * Implemenets hook_enable().
+ */
+function commerce_discount_product_relation_enable() {
+  $query = new EntityFieldQuery();
+  $result = $query->entityCondition('entity_type', 'commerce_discount')
+	  ->propertyCondition('status', 1)
+	  ->execute();
+  if (isset($result['commerce_discount'])) {
+	$discount_ids = array_keys($result['commerce_discount']);
+	$discounts = entity_load('commerce_discount', $discount_ids);
+	foreach ($discounts as $discount) {
+	  commerce_discount_product_relation_products_update_discount($discount);
+	}
+  }
+
+}
